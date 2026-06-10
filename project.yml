@@ -1,0 +1,44 @@
+# XcodeGen manifest for the distributable .app bundle. `swift run iNAMS`
+# covers development; this wrapper exists for signing/notarization/Sparkle.
+#
+#   brew install xcodegen && xcodegen generate
+#   xcodebuild -project iNAMS.xcodeproj -scheme iNAMS build
+#
+# The generated iNAMS.xcodeproj is gitignored.
+name: iNAMS
+options:
+  bundleIdPrefix: com.neo4j-labs
+  deploymentTarget:
+    macOS: "14.0"
+packages:
+  iNAMSPackage:
+    path: .
+targets:
+  iNAMS:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/iNAMS
+    dependencies:
+      - package: iNAMSPackage
+        product: iNAMSKit
+    info:
+      path: App/Info.plist
+      properties:
+        # Menu bar app: no Dock icon, no app switcher entry.
+        LSUIElement: true
+        CFBundleDisplayName: iNAMS
+        # Custom scheme for the Auth0 PKCE callback (inams://auth/callback).
+        CFBundleURLTypes:
+          - CFBundleURLName: com.neo4j-labs.inams.auth
+            CFBundleURLSchemes: [inams]
+        NSUserNotificationsUsageDescription: iNAMS warns you before your NAMS sandbox database expires.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.neo4j-labs.inams
+        # Developer ID distribution (not App Store): hardened runtime on,
+        # App Sandbox off - MCP setup shells out to `claude` and edits
+        # Claude Desktop's config, which the sandbox forbids (docs/PLAN.md).
+        ENABLE_HARDENED_RUNTIME: true
+        ENABLE_APP_SANDBOX: false
+        SWIFT_VERSION: "6.0"
