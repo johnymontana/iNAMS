@@ -64,7 +64,6 @@ Plan locked in via design interview, 2026-06-10. The app is a **menu bar compani
 - Encrypt-at-rest for the pending-capture queue.
 - Sparkle appcast hosting + EdDSA signing key management.
 - Apple Developer Program membership + Developer ID certificate.
-- Exact production base URLs to compile in.
 - Workspace-switcher semantics: "current workspace" is app-local state; captures and newly-minted MCP keys target the selected workspace.
 - Cursor/Windsurf/VS Code MCP setup (snippet screen).
 

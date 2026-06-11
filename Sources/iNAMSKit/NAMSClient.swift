@@ -23,6 +23,30 @@ public enum NAMSError: Error, Equatable {
     }
 }
 
+/// Without this conformance, surfacing a NAMSError via `localizedDescription`
+/// yields the bridged-NSError junk ("iNAMSKit.NAMSError error 0.") and
+/// swallows the message payload.
+extension NAMSError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .unauthorized:
+            return "NAMS rejected the credentials (401)."
+        case .forbidden:
+            return "The API key lacks the required permissions (403)."
+        case .rateLimited:
+            return "NAMS is rate limiting requests (429) - try again shortly."
+        case .server(let status, let message):
+            // Status 0 wraps a transport-level failure; the message is the
+            // underlying URLError text and stands on its own.
+            return status == 0 ? message : "NAMS server error (\(status)): \(message)"
+        case .client(let status, let message):
+            return "NAMS request failed (\(status)): \(message)"
+        case .invalidResponse:
+            return "NAMS returned a response the app could not decode."
+        }
+    }
+}
+
 /// Hand-written client for the NAMS REST surface (see docs/PLAN.md for why
 /// this is not generated). All calls authenticate with the Bearer token from
 /// `tokenProvider` — normally the user's pasted Admin API key out of the
@@ -56,7 +80,7 @@ public final class NAMSClient: Sendable {
         if let workspaceID { body["workspaceId"] = workspaceID }
         return try await send(
             CreatedAPIKey.self, base: config.authBase, method: "POST",
-            path: "/v1/auth/api-keys", body: body
+            path: "/auth/api-keys", body: body
         )
     }
 
@@ -67,7 +91,7 @@ public final class NAMSClient: Sendable {
     public func listAPIKeys(bearerOverride: String? = nil) async throws -> [APIKeyInfo] {
         try await send(
             APIKeyListResponse.self, base: config.authBase, method: "GET",
-            path: "/v1/auth/api-keys", bearerOverride: bearerOverride
+            path: "/auth/api-keys", bearerOverride: bearerOverride
         ).keys
     }
 
@@ -76,7 +100,7 @@ public final class NAMSClient: Sendable {
     public func listWorkspaces() async throws -> [Workspace] {
         try await send(
             WorkspaceListResponse.self, base: config.apiBase, method: "GET",
-            path: "/v1/users/me/workspaces"
+            path: "/users/me/workspaces"
         ).workspaces
     }
 
@@ -86,7 +110,7 @@ public final class NAMSClient: Sendable {
     public func databaseConfig(workspaceID: String) async throws -> DatabaseConfig {
         try await send(
             DatabaseConfig.self, base: config.apiBase, method: "GET",
-            path: "/v1/workspace/database", workspaceID: workspaceID
+            path: "/workspace/database", workspaceID: workspaceID
         )
     }
 
@@ -102,7 +126,7 @@ public final class NAMSClient: Sendable {
         if let metadata { body["metadata"] = .object(metadata.mapValues(AnyJSON.string)) }
         return try await send(
             CreatedConversation.self, base: config.apiBase, method: "POST",
-            path: "/v1/conversations", workspaceID: workspaceID, body: body
+            path: "/conversations", workspaceID: workspaceID, body: body
         )
     }
 
@@ -114,7 +138,7 @@ public final class NAMSClient: Sendable {
     ) async throws -> AddedMessage {
         try await send(
             AddedMessage.self, base: config.apiBase, method: "POST",
-            path: "/v1/conversations/\(conversationID)/messages", workspaceID: workspaceID,
+            path: "/conversations/\(conversationID)/messages", workspaceID: workspaceID,
             body: ["role": role, "content": content]
         )
     }
@@ -129,7 +153,7 @@ public final class NAMSClient: Sendable {
         if let limit { body["limit"] = .int(limit) }
         return try await send(
             MessageSearchResponse.self, base: config.apiBase, method: "POST",
-            path: "/v1/messages/search", workspaceID: workspaceID, body: body
+            path: "/messages/search", workspaceID: workspaceID, body: body
         )
     }
 
@@ -144,7 +168,7 @@ public final class NAMSClient: Sendable {
         if let limit { body["limit"] = .int(limit) }
         return try await send(
             EntitySearchResponse.self, base: config.apiBase, method: "POST",
-            path: "/v1/entities/search", workspaceID: workspaceID, body: body
+            path: "/entities/search", workspaceID: workspaceID, body: body
         )
     }
 

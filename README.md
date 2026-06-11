@@ -58,10 +58,13 @@ Ctrl+C. Things to know about the un-bundled dev binary:
   defaults in any build):
 
   ```bash
-  NAMS_API_BASE_URL=http://localhost:8080 \
-  NAMS_AUTH_BASE_URL=http://localhost:8081 \
+  NAMS_API_BASE_URL=http://localhost:8080/v1 \
+  NAMS_AUTH_BASE_URL=http://localhost:8081/v1 \
   NAMS_MCP_BASE_URL=http://localhost:9090 swift run iNAMS
   ```
+
+  API and auth bases include the `/v1` prefix (like the SDK's endpoint);
+  the MCP base is the bare server URL.
 
 - **Auth**: the paste-a-key prompt works un-bundled too — create an Admin
   key against your local stack (dashboard → API Keys → "Manage workspaces",
@@ -91,8 +94,8 @@ Ctrl+C. Things to know about the un-bundled dev binary:
 The bundled app additionally honors the `defaults` domain:
 
 ```bash
-defaults write com.neo4j-labs.inams NAMSAPIBaseURL  http://localhost:8080
-defaults write com.neo4j-labs.inams NAMSAuthBaseURL http://localhost:8081
+defaults write com.neo4j-labs.inams NAMSAPIBaseURL  http://localhost:8080/v1
+defaults write com.neo4j-labs.inams NAMSAuthBaseURL http://localhost:8081/v1
 defaults write com.neo4j-labs.inams NAMSMCPBaseURL  http://localhost:9090
 ```
 
@@ -117,7 +120,6 @@ xcodebuild -project iNAMS.xcodeproj -scheme iNAMS build
 
 ## Not done yet (see docs/PLAN.md "Deferred")
 
-- Real production base URLs (TODO in `NAMSConfig.swift`).
 - Signing, notarization, Sparkle auto-update, release CI.
 - Encrypt-at-rest for the pending-capture queue.
 - CI contract check of client routes against `vendor/openapi.json`.

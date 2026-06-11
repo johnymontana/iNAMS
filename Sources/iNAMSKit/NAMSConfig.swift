@@ -1,18 +1,20 @@
 import Foundation
 
-/// Base URLs for the NAMS backend services.
+/// Base URLs for the NAMS backend services. API and auth bases include the
+/// `/v1` version prefix (matching the SDK's endpoint convention); request
+/// paths in NAMSClient are version-less.
 ///
 /// Production values are compiled in. Two override layers reroute a build at
 /// the staging or local stack without surfacing an environment picker in the
 /// UI (environment wins over defaults):
 ///
 ///     # bundled app
-///     defaults write com.neo4j-labs.inams NAMSAPIBaseURL http://localhost:8080
+///     defaults write com.neo4j-labs.inams NAMSAPIBaseURL http://localhost:8080/v1
 ///
 ///     # `swift run` development binary (no bundle id, so the defaults
 ///     # domain above does not apply - use the environment instead)
-///     NAMS_API_BASE_URL=http://localhost:8080 \
-///     NAMS_AUTH_BASE_URL=http://localhost:8081 swift run iNAMS
+///     NAMS_API_BASE_URL=http://localhost:8080/v1 \
+///     NAMS_AUTH_BASE_URL=http://localhost:8081/v1 swift run iNAMS
 public struct NAMSConfig: Equatable, Sendable {
     public var apiBase: URL
     public var authBase: URL
@@ -24,18 +26,18 @@ public struct NAMSConfig: Equatable, Sendable {
         self.mcpBase = mcpBase
     }
 
-    // TODO: replace with the real production hostnames before first release
-    // (open item in docs/PLAN.md).
+    // One public gateway fronts every service; the REST surface lives under
+    // /v1 (same endpoint the SDK defaults to) and MCP under /mcp.
     public static let production = NAMSConfig(
-        apiBase: URL(string: "https://api.nams.neo4jlabs.com")!,
-        authBase: URL(string: "https://api.nams.neo4jlabs.com")!,
-        mcpBase: URL(string: "https://mcp.nams.neo4jlabs.com")!
+        apiBase: URL(string: "https://memory.neo4jlabs.com/v1")!,
+        authBase: URL(string: "https://memory.neo4jlabs.com/v1")!,
+        mcpBase: URL(string: "https://memory.neo4jlabs.com/mcp")!
     )
 
     /// The `make dev-all` stack from the project-gaylord monorepo.
     public static let localDev = NAMSConfig(
-        apiBase: URL(string: "http://localhost:8080")!,
-        authBase: URL(string: "http://localhost:8081")!,
+        apiBase: URL(string: "http://localhost:8080/v1")!,
+        authBase: URL(string: "http://localhost:8081/v1")!,
         mcpBase: URL(string: "http://localhost:9090")!
     )
 

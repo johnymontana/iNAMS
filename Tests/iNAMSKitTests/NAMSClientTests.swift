@@ -189,6 +189,21 @@ final class NAMSClientTests: XCTestCase {
         XCTAssertNotNil(keys[0].expiryDate, "fractional-second RFC3339 must parse")
     }
 
+    func testErrorDescriptionsAreHumanReadable() {
+        // Transport failures (status 0) carry the URLError text verbatim;
+        // without LocalizedError this degraded to "NAMSError error 0."
+        XCTAssertEqual(
+            NAMSError.server(status: 0, message: "A server with the specified hostname could not be found.").localizedDescription,
+            "A server with the specified hostname could not be found."
+        )
+        XCTAssertEqual(
+            NAMSError.server(status: 503, message: "degraded").localizedDescription,
+            "NAMS server error (503): degraded"
+        )
+        XCTAssertTrue(NAMSError.unauthorized.localizedDescription.contains("401"))
+        XCTAssertTrue(NAMSError.forbidden.localizedDescription.contains("403"))
+    }
+
     func testListAPIKeys403MapsToForbidden() async throws {
         MockURLProtocol.handler = { _, _ in
             (403, Data(#"{"error":"requires a user token or an admin api key"}"#.utf8))
