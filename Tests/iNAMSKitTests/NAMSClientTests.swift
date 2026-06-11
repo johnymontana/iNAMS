@@ -146,10 +146,10 @@ final class NAMSClientTests: XCTestCase {
         }
     }
 
-    func testCreateAPIKeyUsesBearerOverrideAndAuthBase() async throws {
+    func testCreateAPIKeyUsesStoredKeyAndAuthBase() async throws {
         MockURLProtocol.handler = { request, body in
             XCTAssertEqual(request.url?.port, 8081, "api-key minting goes to nams-auth")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer exchanged-jwt")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer nams_test_key")
             let json = try JSONSerialization.jsonObject(with: body ?? Data()) as? [String: String]
             XCTAssertEqual(json?["category"], "workspace")
             XCTAssertEqual(json?["workspaceId"], "ws-1")
@@ -161,10 +161,74 @@ final class NAMSClientTests: XCTestCase {
 
         let client = makeClient()
         let created = try await client.createAPIKey(
-            label: "MCP – Claude Code", category: "workspace",
-            workspaceID: "ws-1", bearerOverride: "exchanged-jwt"
+            label: "MCP – Claude Code", category: "workspace", workspaceID: "ws-1"
         )
         XCTAssertEqual(created.key, "nams_fresh")
         XCTAssertEqual(created.workspaceId, "ws-1")
+    }
+
+    func testListAPIKeysUsesBearerOverrideAndDecodes() async throws {
+        MockURLProtocol.handler = { request, _ in
+            XCTAssertEqual(request.url?.port, 8081, "key listing goes to nams-auth")
+            XCTAssertEqual(request.url?.path, "/v1/auth/api-keys")
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Authorization"), "Bearer nams_pasted_key",
+                "validation must use the pasted key, not the stored one"
+            )
+            let payload = """
+            {"keys":[{"id":"abc123def456","label":"my admin key","createdAt":"2026-06-01T00:00:00Z","revokedAt":null,"expiresAt":"2026-08-30T12:00:00.123456Z","scopes":["workspace:admin"],"workspaceId":null}]}
+            """
+            return (200, Data(payload.utf8))
+        }
+
+        let client = makeClient()
+        let keys = try await client.listAPIKeys(bearerOverride: "nams_pasted_key")
+        XCTAssertEqual(keys.count, 1)
+        XCTAssertEqual(keys[0].id, "abc123def456")
+        XCTAssertNotNil(keys[0].expiryDate, "fractional-second RFC3339 must parse")
+    }
+
+    func testListAPIKeys403MapsToForbidden() async throws {
+        MockURLProtocol.handler = { _, _ in
+            (403, Data(#"{"error":"requires a user token or an admin api key"}"#.utf8))
+        }
+        let client = makeClient()
+        do {
+            _ = try await client.listAPIKeys(bearerOverride: "nams_workspace_key")
+            XCTFail("expected forbidden")
+        } catch let error as NAMSError {
+            XCTAssertEqual(error, .forbidden, "workspace-bound keys are rejected by the list endpoint")
+        }
+    }
+}
+
+final class APIKeyFormatTests: XCTestCase {
+    func testKeyIDParsesFromRawKey() {
+        XCTAssertEqual(APIKeyFormat.keyID(fromRawKey: "nams_abc123def456_s3cr3tpart"), "abc123def456")
+    }
+
+    func testKeyIDToleratesUnderscoresInSecret() {
+        XCTAssertEqual(APIKeyFormat.keyID(fromRawKey: "nams_abc123_extra_underscores"), "abc123")
+    }
+
+    func testKeyIDRejectsMalformedKeys() {
+        XCTAssertNil(APIKeyFormat.keyID(fromRawKey: "sk-not-a-nams-key"))
+        XCTAssertNil(APIKeyFormat.keyID(fromRawKey: "nams_nosecretseparator"))
+        XCTAssertNil(APIKeyFormat.keyID(fromRawKey: "nams__emptyid"))
+        XCTAssertNil(APIKeyFormat.keyID(fromRawKey: ""))
+    }
+
+    func testExpiryDateParsesWithAndWithoutFractionalSeconds() {
+        func info(_ expiresAt: String?) -> APIKeyInfo {
+            APIKeyInfo(
+                id: "k", label: nil, createdAt: nil, revokedAt: nil,
+                expiresAt: expiresAt, scopes: nil, workspaceId: nil
+            )
+        }
+        XCTAssertNotNil(info("2026-08-30T12:00:00.123456Z").expiryDate)
+        XCTAssertNotNil(info("2026-08-30T12:00:00Z").expiryDate)
+        XCTAssertNil(info("not-a-date").expiryDate)
+        XCTAssertNil(info(nil).expiryDate)
     }
 }

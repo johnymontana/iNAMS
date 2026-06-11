@@ -2,12 +2,17 @@ import Foundation
 
 /// Base URLs for the NAMS backend services.
 ///
-/// Production values are compiled in; `UserDefaults` overrides
-/// (`NAMSAPIBaseURL`, `NAMSAuthBaseURL`, `NAMSMCPBaseURL`) reroute a build at
+/// Production values are compiled in. Two override layers reroute a build at
 /// the staging or local stack without surfacing an environment picker in the
-/// UI:
+/// UI (environment wins over defaults):
 ///
+///     # bundled app
 ///     defaults write com.neo4j-labs.inams NAMSAPIBaseURL http://localhost:8080
+///
+///     # `swift run` development binary (no bundle id, so the defaults
+///     # domain above does not apply - use the environment instead)
+///     NAMS_API_BASE_URL=http://localhost:8080 \
+///     NAMS_AUTH_BASE_URL=http://localhost:8081 swift run iNAMS
 public struct NAMSConfig: Equatable, Sendable {
     public var apiBase: URL
     public var authBase: URL
@@ -34,17 +39,19 @@ public struct NAMSConfig: Equatable, Sendable {
         mcpBase: URL(string: "http://localhost:9090")!
     )
 
-    public static func resolved(defaults: UserDefaults = .standard) -> NAMSConfig {
+    public static func resolved(
+        defaults: UserDefaults = .standard,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> NAMSConfig {
         var config = NAMSConfig.production
-        if let s = defaults.string(forKey: "NAMSAPIBaseURL"), let url = URL(string: s) {
-            config.apiBase = url
+        func override(_ envKey: String, _ defaultsKey: String) -> URL? {
+            if let s = environment[envKey], let url = URL(string: s) { return url }
+            if let s = defaults.string(forKey: defaultsKey), let url = URL(string: s) { return url }
+            return nil
         }
-        if let s = defaults.string(forKey: "NAMSAuthBaseURL"), let url = URL(string: s) {
-            config.authBase = url
-        }
-        if let s = defaults.string(forKey: "NAMSMCPBaseURL"), let url = URL(string: s) {
-            config.mcpBase = url
-        }
+        if let url = override("NAMS_API_BASE_URL", "NAMSAPIBaseURL") { config.apiBase = url }
+        if let url = override("NAMS_AUTH_BASE_URL", "NAMSAuthBaseURL") { config.authBase = url }
+        if let url = override("NAMS_MCP_BASE_URL", "NAMSMCPBaseURL") { config.mcpBase = url }
         return config
     }
 }

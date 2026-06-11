@@ -25,9 +25,9 @@ public enum NAMSError: Error, Equatable {
 
 /// Hand-written client for the NAMS REST surface (see docs/PLAN.md for why
 /// this is not generated). All calls authenticate with the Bearer token from
-/// `tokenProvider` — normally the app's self-provisioned Admin API key out of
-/// the Keychain — except where a per-call override is passed (used during
-/// onboarding, when the key to use was just issued and isn't stored yet).
+/// `tokenProvider` — normally the user's pasted Admin API key out of the
+/// Keychain — except where a per-call override is passed (used to validate
+/// a freshly pasted key before it is stored).
 public final class NAMSClient: Sendable {
     public let config: NAMSConfig
     private let session: URLSession
@@ -45,39 +45,30 @@ public final class NAMSClient: Sendable {
 
     // MARK: - Auth (nams-auth)
 
-    /// Exchange an Auth0 access token (plus optional ID token, revalidated
-    /// server-side against Auth0's JWKS) for short-lived per-workspace JWTs.
-    public func exchange(auth0AccessToken: String, idToken: String?) async throws -> ExchangeResponse {
-        var body: [String: String] = ["access_token": auth0AccessToken]
-        if let idToken { body["id_token"] = idToken }
-        return try await send(
-            ExchangeResponse.self, base: config.authBase, method: "POST",
-            path: "/v1/auth/exchange", body: body, authenticated: false
-        )
-    }
-
-    /// Mint an API key. Requires a user token or an Admin key; pass
-    /// `bearerOverride` when bootstrapping with a just-exchanged JWT.
+    /// Mint an API key. Requires the stored Admin key (used by MCP setup to
+    /// issue workspace-bound keys).
     public func createAPIKey(
         label: String,
         category: String,
-        workspaceID: String? = nil,
-        bearerOverride: String? = nil
+        workspaceID: String? = nil
     ) async throws -> CreatedAPIKey {
         var body: [String: String] = ["label": label, "category": category]
         if let workspaceID { body["workspaceId"] = workspaceID }
         return try await send(
             CreatedAPIKey.self, base: config.authBase, method: "POST",
-            path: "/v1/auth/api-keys", body: body, bearerOverride: bearerOverride
+            path: "/v1/auth/api-keys", body: body
         )
     }
 
-    /// Rotate the app's own key before its 90-day expiry.
-    public func rotateAPIKey(id: String) async throws -> CreatedAPIKey {
+    /// List the caller's API keys (metadata only). The endpoint admits user
+    /// tokens and Admin keys but 403s workspace-bound keys, so one call with
+    /// `bearerOverride` set to a pasted key proves it is both valid and
+    /// admin-category — and returns its expiry — before anything is stored.
+    public func listAPIKeys(bearerOverride: String? = nil) async throws -> [APIKeyInfo] {
         try await send(
-            CreatedAPIKey.self, base: config.authBase, method: "POST",
-            path: "/v1/auth/api-keys/\(id)/rotate", body: Empty()
-        )
+            APIKeyListResponse.self, base: config.authBase, method: "GET",
+            path: "/v1/auth/api-keys", bearerOverride: bearerOverride
+        ).keys
     }
 
     // MARK: - Workspaces

@@ -6,21 +6,6 @@ import Foundation
 
 // MARK: - Auth (nams-auth)
 
-/// `POST /v1/auth/exchange` — one short-lived JWT per workspace membership.
-public struct ExchangeResponse: Codable, Sendable, Equatable {
-    public let workspaces: [WorkspaceAuthInfo]
-}
-
-public struct WorkspaceAuthInfo: Codable, Sendable, Equatable {
-    public let workspaceID: String
-    public let token: String
-
-    enum CodingKeys: String, CodingKey {
-        case workspaceID = "workspace_id"
-        case token
-    }
-}
-
 /// `POST /v1/auth/api-keys` (201). The raw key is returned exactly once.
 public struct CreatedAPIKey: Codable, Sendable, Equatable {
     public let id: String
@@ -28,6 +13,43 @@ public struct CreatedAPIKey: Codable, Sendable, Equatable {
     public let label: String
     public let category: String?
     public let workspaceId: String?
+}
+
+/// One row of `GET /v1/auth/api-keys` — metadata only, never the raw key.
+public struct APIKeyInfo: Codable, Sendable, Equatable {
+    public let id: String
+    public let label: String?
+    public let createdAt: String?
+    public let revokedAt: String?
+    public let expiresAt: String?
+    public let scopes: [String]?
+    public let workspaceId: String?
+
+    /// Expiry as a Date. The backend emits RFC3339 with fractional seconds
+    /// (Go time.Time through JSON), but accept the plain form too.
+    public var expiryDate: Date? {
+        guard let expiresAt else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: expiresAt) ?? ISO8601DateFormatter().date(from: expiresAt)
+    }
+}
+
+struct APIKeyListResponse: Codable {
+    let keys: [APIKeyInfo]
+}
+
+/// Raw NAMS keys embed their own ID — `nams_<keyID>_<secret>` — so a pasted
+/// key can be matched against the metadata list without an extra endpoint.
+/// The keyID length is the backend's to choose; only the shape is assumed.
+public enum APIKeyFormat {
+    public static func keyID(fromRawKey raw: String) -> String? {
+        let prefix = "nams_"
+        guard raw.hasPrefix(prefix) else { return nil }
+        let rest = raw.dropFirst(prefix.count)
+        guard let underscore = rest.firstIndex(of: "_"), rest.startIndex < underscore else { return nil }
+        return String(rest[..<underscore])
+    }
 }
 
 // MARK: - Workspaces (nams-tenants via nams-api proxy)

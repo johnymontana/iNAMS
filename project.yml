@@ -28,11 +28,7 @@ targets:
         # Menu bar app: no Dock icon, no app switcher entry.
         LSUIElement: true
         CFBundleDisplayName: iNAMS
-        # Custom scheme for the Auth0 PKCE callback (inams://auth/callback).
-        CFBundleURLTypes:
-          - CFBundleURLName: com.neo4j-labs.inams.auth
-            CFBundleURLSchemes: [inams]
-        NSUserNotificationsUsageDescription: iNAMS warns you before your NAMS sandbox database expires.
+        NSUserNotificationsUsageDescription: iNAMS warns you before your NAMS sandbox database or API key expires.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.neo4j-labs.inams

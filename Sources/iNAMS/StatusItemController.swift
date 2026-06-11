@@ -17,11 +17,23 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
+        // Text fallback keeps the item visible (non-zero width) even if the
+        // symbol ever fails to resolve - an imageless, titleless variable-
+        // length status item renders as nothing at all.
+        let fallbackTitle: String
         if let button = statusItem.button {
-            button.image = NSImage(
+            if let image = NSImage(
                 systemSymbolName: "brain.head.profile",
                 accessibilityDescription: "iNAMS"
-            )
+            ) {
+                button.image = image
+                fallbackTitle = ""
+            } else {
+                fallbackTitle = "iN"
+                button.title = fallbackTitle
+            }
+        } else {
+            fallbackTitle = ""
         }
         let menu = NSMenu()
         menu.delegate = self
@@ -32,7 +44,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         appState.$pendingCount
             .receive(on: DispatchQueue.main)
             .sink { [weak self] count in
-                self?.statusItem.button?.title = count > 0 ? " \(count)" : ""
+                let badge = count > 0 ? " \(count)" : ""
+                self?.statusItem.button?.title = fallbackTitle + badge
             }
             .store(in: &cancellables)
     }
@@ -60,13 +73,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             addStatusItems(to: menu)
             addMCPItems(to: menu)
             menu.addItem(.separator())
-            let signOut = NSMenuItem(title: "Sign Out", action: #selector(signOut), keyEquivalent: "")
-            signOut.target = self
-            menu.addItem(signOut)
+            let forget = NSMenuItem(title: "Forget API Key", action: #selector(forgetKey), keyEquivalent: "")
+            forget.target = self
+            menu.addItem(forget)
         } else {
-            let signIn = NSMenuItem(title: "Sign In to NAMS…", action: #selector(signIn), keyEquivalent: "")
-            signIn.target = self
-            menu.addItem(signIn)
+            let connect = NSMenuItem(title: "Connect to NAMS…", action: #selector(connect), keyEquivalent: "")
+            connect.target = self
+            menu.addItem(connect)
         }
 
         menu.addItem(.separator())
@@ -142,13 +155,47 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return "Sandbox expires in \(hours)h \(minutes)m"
     }
 
+    // MARK: - Connect prompt
+
+    /// Modal paste-an-Admin-key prompt; loops until a key validates or the
+    /// user cancels. The field is deliberately a plain (visible) NSTextField:
+    /// being able to eyeball a truncated paste beats masking a credential
+    /// that was on the clipboard a second ago.
+    func promptForKey() {
+        Task { await runConnectPrompt() }
+    }
+
+    private func runConnectPrompt() async {
+        var problem: String?
+        while true {
+            let alert = NSAlert()
+            alert.messageText = "Connect to NAMS"
+            alert.informativeText = (problem.map { "\($0)\n\n" } ?? "")
+                + "Paste an Admin API key. Create one in the NAMS dashboard under API Keys → “Manage workspaces”."
+            let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+            field.placeholderString = "nams_…"
+            alert.accessoryView = field
+            alert.addButton(withTitle: "Connect")
+            alert.addButton(withTitle: "Cancel")
+            alert.window.initialFirstResponder = field
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            do {
+                try await appState.connect(rawKey: field.stringValue)
+                return
+            } catch {
+                problem = error.localizedDescription
+            }
+        }
+    }
+
     // MARK: - Actions
 
     @objc private func openCapture() { panelController.show(mode: .capture) }
     @objc private func openSearch() { panelController.show(mode: .search) }
     @objc private func retrySync() { Task { await appState.drainNow() } }
-    @objc private func signOut() { appState.signOut() }
-    @objc private func signIn() { Task { await appState.signIn() } }
+    @objc private func forgetKey() { appState.forgetKey() }
+    @objc private func connect() { promptForKey() }
 
     @objc private func selectWorkspace(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }

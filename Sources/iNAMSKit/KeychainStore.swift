@@ -9,7 +9,6 @@ public struct KeychainStore: Sendable {
     }
 
     public static let apiKeyAccount = "nams-api-key"
-    public static let apiKeyIDAccount = "nams-api-key-id"
 
     public let service: String
 

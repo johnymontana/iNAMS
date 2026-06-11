@@ -23,11 +23,17 @@ Design rationale and the full decision record live in [docs/PLAN.md](docs/PLAN.m
 
 ## Auth model
 
-One-time browser sign-in (Auth0 PKCE) → `POST /v1/auth/exchange` → the app
-mints its own **Admin API key** (label `iNAMS – <Mac name>`) and stores it in
-the Keychain. Admin category because sandbox status requires
+Paste an **Admin API key** from the NAMS dashboard (API Keys → "Manage
+workspaces") into the app — it prompts on first launch, and "Connect to
+NAMS…" in the menu does the same later. The key is validated server-side
+(`GET /v1/auth/api-keys`, which also rejects workspace-bound keys with 403)
+and stored in the Keychain. Admin category because sandbox status requires
 `workspace:admin` and MCP setup needs key-minting rights. MCP clients never
 see this key — each gets its own data-plane-only workspace key.
+
+Keys expire after a fixed 90 days and the app never rotates a pasted key
+(it's yours — rotating would invalidate your copy). It warns 7 days and
+1 day before expiry; after that, paste a fresh key.
 
 ## Development
 
@@ -37,14 +43,57 @@ swift build         # compile everything
 swift run iNAMS     # run the menu bar app un-bundled (notifications no-op)
 ```
 
-Point a dev build at a local `make dev-all` stack from the monorepo:
+### Testing the app under `swift run`
+
+`swift run iNAMS` blocks the terminal and prints a launch banner; quit with
+Ctrl+C. Things to know about the un-bundled dev binary:
+
+- **Finding the icon**: the brain icon sits near the clock, but macOS hides
+  status items that don't fit — a crowded menu bar (or the notch) can
+  swallow it. The global hotkey **⌃⌥M** toggles the capture panel whether
+  or not the icon is visible, so use that as the smoke test. Don't run two
+  instances at once (two icons, double hotkey registration).
+- **Config**: there is no bundle id, so `defaults write com.neo4j-labs.inams`
+  does **not** apply. Use environment variables instead (these win over
+  defaults in any build):
+
+  ```bash
+  NAMS_API_BASE_URL=http://localhost:8080 \
+  NAMS_AUTH_BASE_URL=http://localhost:8081 \
+  NAMS_MCP_BASE_URL=http://localhost:9090 swift run iNAMS
+  ```
+
+- **Auth**: the paste-a-key prompt works un-bundled too — create an Admin
+  key against your local stack (dashboard → API Keys → "Manage workspaces",
+  or `scripts/dev-token.sh` in the monorepo) and paste it in. For scripted
+  setups you can also seed the Keychain directly; the app reads it on
+  launch:
+
+  ```bash
+  security add-generic-password -U \
+    -s com.neo4j-labs.inams -a nams-api-key -w "nams_<your-key>"
+  ```
+
+  Remove it again with
+  `security delete-generic-password -s com.neo4j-labs.inams -a nams-api-key`.
+  (Note: a key seeded this way skips the validation/expiry-warning path the
+  paste prompt provides.)
+
+- **End-to-end check**: with the local `make dev-all` stack running and a
+  key seeded, press ⌃⌥M, jot a note, then confirm it landed:
+
+  ```bash
+  curl -s -X POST http://localhost:8080/v1/messages/search \
+    -H "Authorization: Bearer nams_<your-key>" \
+    -H "Content-Type: application/json" -d '{"query":"<your note text>"}' | jq .
+  ```
+
+The bundled app additionally honors the `defaults` domain:
 
 ```bash
 defaults write com.neo4j-labs.inams NAMSAPIBaseURL  http://localhost:8080
 defaults write com.neo4j-labs.inams NAMSAuthBaseURL http://localhost:8081
 defaults write com.neo4j-labs.inams NAMSMCPBaseURL  http://localhost:9090
-defaults write com.neo4j-labs.inams NAMSAuth0Domain <tenant>.us.auth0.com
-defaults write com.neo4j-labs.inams NAMSAuth0ClientID <native-app-client-id>
 ```
 
 ### App bundle
@@ -60,17 +109,15 @@ xcodebuild -project iNAMS.xcodeproj -scheme iNAMS build
 - `Sources/iNAMSKit/` — AppKit-free core: REST client, models, Keychain
   store, durable capture queue. Fully unit-tested.
 - `Sources/iNAMS/` — the menu bar app: AppKit shell (status item, floating
-  panel, Carbon hotkey) hosting SwiftUI views; auth, polling, MCP setup.
+  panel, Carbon hotkey) hosting SwiftUI views; key connect flow, polling,
+  MCP setup.
 - `vendor/openapi.json` — pinned copy of the backend's OpenAPI spec for
   contract checks (see `vendor/SPEC_PIN.md`).
 - `project.yml` — XcodeGen manifest for the signed/notarized `.app`.
 
 ## Not done yet (see docs/PLAN.md "Deferred")
 
-- Real production base URLs + Auth0 Native app registration (placeholders
-  marked `REPLACE-ME` / TODO in `NAMSConfig.swift` and `AuthController.swift`).
-- Key self-rotation scheduling before the 90-day expiry (client support
-  exists: `rotateAPIKey`).
+- Real production base URLs (TODO in `NAMSConfig.swift`).
 - Signing, notarization, Sparkle auto-update, release CI.
 - Encrypt-at-rest for the pending-capture queue.
 - CI contract check of client routes against `vendor/openapi.json`.

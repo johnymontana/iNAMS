@@ -17,8 +17,10 @@ Plan locked in via design interview, 2026-06-10. The app is a **menu bar compani
 - **macOS 14+**, Swift, async/await throughout.
 
 ### Auth
-- **Browser sign-in, self-provisioned key**: `ASWebAuthenticationSession` (Auth0 PKCE, requires registering a **Native** app in Auth0) → `POST /v1/auth/exchange` → short-lived JWT → app immediately mints its own **Admin API key** (label `iNAMS – <Mac name>`) → stored in **Keychain**; the key powers everything thereafter.
-- Verified in `services/nams-auth/main.go:246–254`: the `/v1/auth/api-keys` group is guarded by `RequireUserTokenOrAdminKey()`, so the app's Admin key can (a) mint Workspace-bound keys for MCP setup and (b) **self-rotate** via `POST /v1/auth/api-keys/:id/rotate` before the 90-day expiry — no forced re-login.
+*(Revised 2026-06-11, superseding the original Auth0-PKCE design — that flow was never registered in Auth0 and shipped only placeholder config; the browser callback also couldn't work for un-bundled `swift run` builds.)*
+- **Paste-in Admin API key**: the user mints an **Admin key** in the NAMS dashboard (API Keys → "Manage workspaces") and pastes it into the app (NSAlert prompt: first launch + "Connect to NAMS…" menu item) → validated server-side → stored in **Keychain**; the key powers everything thereafter.
+- **Validation probe**: `GET /v1/auth/api-keys` is guarded by `RequireUserTokenOrAdminKey()` and side-effect-free, so one call with the pasted key proves it is valid (else 401) **and** admin-category (workspace-bound keys 403) — and returns the key's `expiresAt` for the pre-expiry warning.
+- **No rotation**: a pasted key is the *user's* credential (password manager, other tooling) — the app must never invalidate it by rotating. Keys expire after a fixed 90 days (`gaylord-auth-issuer/apikey.go: APIKeyTTL`); the app schedules local notifications 7 d and 1 d ahead, and on a mid-session 401 drops to disconnected with a notification. The user pastes a fresh key.
 - Why Admin key: sandbox status (`GET /v1/workspace/database`) is `workspace:admin`-gated, and MCP setup needs minting privileges. A Workspace key cannot power the chosen feature set.
 
 ### Capture semantics
@@ -61,7 +63,6 @@ Plan locked in via design interview, 2026-06-10. The app is a **menu bar compani
 ## Deferred / open items
 - Encrypt-at-rest for the pending-capture queue.
 - Sparkle appcast hosting + EdDSA signing key management.
-- Auth0 Native application registration (callback scheme / allowed callbacks).
 - Apple Developer Program membership + Developer ID certificate.
 - Exact production base URLs to compile in.
 - Workspace-switcher semantics: "current workspace" is app-local state; captures and newly-minted MCP keys target the selected workspace.
@@ -69,7 +70,7 @@ Plan locked in via design interview, 2026-06-10. The app is a **menu bar compani
 
 ## Suggested build order
 1. Backend PR in project-gaylord: workspace-wide message search endpoint (+ swag, docs).
-2. Repo scaffold, API client, Keychain, auth flow (sign-in → exchange → mint key).
+2. Repo scaffold, API client, Keychain, auth flow (paste key → validate → store).
 3. Capture panel + hotkey + durable queue.
 4. Search panel (entities first; messages once the endpoint ships).
 5. Status polling + notifications + workspace switcher.

@@ -22,6 +22,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         appState.start()
+
+        // `swift run` users have no other feedback that launch succeeded -
+        // the icon can hide under the notch/overflow on a crowded menu bar.
+        print("iNAMS is running. Look for the brain icon near the clock (a crowded menu bar or the notch can hide it).")
+        print("Global hotkey: ctrl+opt+M toggles the capture panel even when the icon is hidden. Ctrl+C here quits.")
+        print("API base: \(appState.config.apiBase) | connected: \(appState.isSignedIn)")
+        fflush(stdout) // stdout is fully buffered when redirected to a file/pipe
+
+        // First-run onboarding: a menu bar accessory has no window and the
+        // icon can hide under the notch, so an unprompted first launch looks
+        // like nothing happened. One-shot - cancelling is remembered and the
+        // "Connect to NAMS…" menu item remains the way back in.
+        let promptFlag = "HasOfferedConnectPrompt"
+        if !appState.isSignedIn && !UserDefaults.standard.bool(forKey: promptFlag) {
+            UserDefaults.standard.set(true, forKey: promptFlag)
+            statusItemController.promptForKey()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

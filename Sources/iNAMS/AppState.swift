@@ -10,7 +10,6 @@ final class AppState: ObservableObject {
     let config = NAMSConfig.resolved()
     let client: NAMSClient
     let queue: CaptureQueue?
-    private let auth = AuthController()
 
     @Published var isSignedIn: Bool
     @Published var workspaces: [Workspace] = []
@@ -69,7 +68,7 @@ final class AppState: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         guard let workspaceID = selectedWorkspaceID else {
-            lastError = "No workspace selected - sign in first"
+            lastError = "No workspace selected - connect to NAMS first"
             return
         }
         guard let queue else {
@@ -172,9 +171,15 @@ final class AppState: ObservableObject {
             }
             lastError = nil
         } catch let error as NAMSError where error == .unauthorized {
-            // Key revoked or past its 90-day expiry - surface re-auth.
+            // Key revoked or past its 90-day expiry - needs a fresh paste.
+            // refreshStatus guards on isSignedIn, so this fires once.
             isSignedIn = false
-            lastError = "Session expired - sign in again"
+            lastError = "API key expired or revoked - connect again"
+            Notifier.notifyNow(
+                id: "key-expired",
+                title: "iNAMS lost access to NAMS",
+                body: "The API key was revoked or hit its 90-day expiry. Choose “Connect to NAMS…” from the menu bar icon and paste a fresh Admin key."
+            )
             return
         } catch {
             lastError = "Status refresh failed: \(error)"
@@ -214,22 +219,79 @@ final class AppState: ObservableObject {
         )
     }
 
-    // MARK: - Auth
+    // MARK: - Connection (pasted Admin API key)
 
-    func signIn() async {
-        do {
-            try await auth.signIn(client: client, keychain: keychain)
-            isSignedIn = true
-            lastError = nil
-            await refreshStatus()
-        } catch {
-            lastError = "Sign-in failed: \(error.localizedDescription)"
+    enum ConnectError: LocalizedError {
+        case notAdminKey
+        case invalidKey
+        case network(String)
+        case keychain(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .notAdminKey:
+                return "That key is workspace-bound. iNAMS needs an Admin key — create one in the dashboard under API Keys → “Manage workspaces”."
+            case .invalidKey:
+                return "NAMS rejected the key — it may be revoked, expired, or incomplete."
+            case .network(let msg):
+                return "Could not reach NAMS to validate the key: \(msg)"
+            case .keychain(let msg):
+                return "The key validated but could not be stored in the Keychain: \(msg)"
+            }
         }
     }
 
-    func signOut() {
+    /// Validate a pasted Admin key against the server, then store it.
+    /// `GET /v1/auth/api-keys` is admin-gated and side-effect-free, so one
+    /// call proves both validity (else 401) and category (403 for
+    /// workspace-bound keys) — and yields the key's expiry for the warning.
+    func connect(rawKey: String) async throws {
+        let key = rawKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { throw ConnectError.invalidKey }
+        let keys: [APIKeyInfo]
+        do {
+            keys = try await client.listAPIKeys(bearerOverride: key)
+        } catch NAMSError.forbidden {
+            throw ConnectError.notAdminKey
+        } catch NAMSError.unauthorized {
+            throw ConnectError.invalidKey
+        } catch {
+            throw ConnectError.network(error.localizedDescription)
+        }
+        do {
+            try keychain.set(key, account: KeychainStore.apiKeyAccount)
+        } catch {
+            throw ConnectError.keychain(String(describing: error))
+        }
+        isSignedIn = true
+        lastError = nil
+        rememberExpiry(rawKey: key, in: keys)
+        await refreshStatus()
+    }
+
+    /// The list response covers all the user's keys; the pasted key's own
+    /// row is found via the keyID embedded in `nams_<keyID>_<secret>`.
+    private func rememberExpiry(rawKey: String, in keys: [APIKeyInfo]) {
+        guard let id = APIKeyFormat.keyID(fromRawKey: rawKey),
+              let expiry = keys.first(where: { $0.id == id })?.expiryDate
+        else {
+            UserDefaults.standard.removeObject(forKey: Self.expiryDefaultsKey)
+            Notifier.cancelKeyExpiryWarnings()
+            return
+        }
+        UserDefaults.standard.set(expiry, forKey: Self.expiryDefaultsKey)
+        Notifier.scheduleKeyExpiryWarnings(expiry: expiry)
+    }
+
+    private static let expiryDefaultsKey = "APIKeyExpiresAt"
+
+    func forgetKey() {
         try? keychain.delete(account: KeychainStore.apiKeyAccount)
-        try? keychain.delete(account: KeychainStore.apiKeyIDAccount)
+        // Earlier builds (self-minted-key era) also stored the key's id for
+        // rotation; clean up the orphaned entry.
+        try? keychain.delete(account: "nams-api-key-id")
+        UserDefaults.standard.removeObject(forKey: Self.expiryDefaultsKey)
+        Notifier.cancelKeyExpiryWarnings()
         isSignedIn = false
         workspaces = []
         sandboxExpiresAt = nil
